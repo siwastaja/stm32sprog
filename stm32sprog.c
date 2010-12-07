@@ -83,7 +83,6 @@ typedef struct {
     size_t flashPageSize;
     useconds_t eraseDelay;
     useconds_t writeDelay;
-    bool firstRead;
 } DeviceParameters;
 
 static void printUsage(void);
@@ -356,7 +355,6 @@ static bool stmConnect(void) {
         if(++retries > MAX_RETRIES) return false;
         (void)bWrite(ttyFd, &data, 1);
     } while(!stmRecvAck());
-    devParams.firstRead = true;
     return true;
 }
 
