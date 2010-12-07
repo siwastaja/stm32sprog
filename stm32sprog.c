@@ -409,7 +409,7 @@ static bool stmGetDevParams(void) {
     }
     if(!stmSendByte(CMD_GET_ID)) return false;
     (void)read(ttyFd, &data, 1);
-    bool success = data == 1;
+    if(data != 1) return false;
     uint16_t id = 0;
     for(int i = data; i >= 0; --i) {
         (void)read(ttyFd, &data, 1);
@@ -417,6 +417,7 @@ static bool stmGetDevParams(void) {
             id |= data << (i * CHAR_BIT);
         }
     }
+    if(!stmRecvAck()) return false;
     switch(id) {
     case ID_LOW_DENSITY:
         devParams.flashEndAddr = 0x08008000;
@@ -438,11 +439,11 @@ static bool stmGetDevParams(void) {
         devParams.flashEndAddr = 0x08020000;
         break;
     default:
-        success = false;
+        return false;
         break;
     }
 
-    return success;
+    return true;
 }
 
 static bool stmEraseFlash(void) {
@@ -547,12 +548,6 @@ static bool stmReadBlock(uint32_t addr, uint8_t *buff, size_t size) {
     if(!stmSendByte(CMD_READ_MEM)) return false;
     if(!stmSendAddr(addr)) return false;
     if(!stmSendByte(size - 1)) return false;
-    if(devParams.firstRead) {
-        // The first read after device connection seems to include an extra ACK
-        // byte immediately before the data.  This is a workaround.
-        (void)stmRecvAck();
-        devParams.firstRead = false;
-    }
     (void)read(ttyFd, buff, size);
     return true;
 }
