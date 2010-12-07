@@ -604,11 +604,11 @@ static bool stmCompareToFile(const char *fileName) {
 
 static void printProgressBar(int percent) {
     int num = percent * 70 / 100;
-    printf("\r%3d%%|", percent);
+    printf("\r%3d%%[", percent);
     for(int i = 0; i < 70; ++i) {
         printf(i < num ? "=" : " ");
     }
-    printf("|");
+    printf("]");
     fflush(stdout);
 }
 
