@@ -514,7 +514,7 @@ static bool stmEraseFlash(void) {
 
         // TODO: Test this code with an actual device.
         if(!stmSendByte(CMD_EXTENDED_ERASE)) return false;
-        uint8_t data[3] = { 0xFF, 0xFF, 0x00 };
+        uint8_t data[] = { 0xFF, 0xFF, 0x00 };
         if(!bWrite(ttyFd, data, sizeof(data))) return false;
         if(!stmRecvAck()) return false;
     } else {
