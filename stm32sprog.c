@@ -108,6 +108,7 @@ static bool stmWriteBlock(uint32_t addr, const uint8_t *buff, size_t size);
 static bool stmWriteFromFile(const char *fileName);
 static bool stmReadBlock(uint32_t addr, uint8_t *buff, size_t size);
 static bool stmCompareToFile(const char *fileName);
+static bool stmRun();
 static void printProgressBar(int percent);
 
 static int ttyFd = -1;
@@ -122,8 +123,9 @@ int main(int argc, char **argv) {
     char *fileName = NULL;
     bool erase = false;
     bool verify = false;
+    bool run = false;
 
-    while((opt = getopt(argc, argv, "b:d:ehvw:")) != -1) {
+    while((opt = getopt(argc, argv, "b:d:ehrvw:")) != -1) {
         switch(opt) {
         case 'b':
             switch(atoi(optarg)) {
@@ -170,6 +172,9 @@ int main(int argc, char **argv) {
         case 'e':
             erase = true;
             break;
+        case 'r':
+            run = true;
+            break;
         case 'v':
             verify = true;
             break;
@@ -190,7 +195,7 @@ int main(int argc, char **argv) {
         goto ExitApp;
     }
 
-    success = erase || fileName != NULL;
+    success = erase || run || fileName != NULL;
     if(!success) {
         fprintf(stderr, "No actions specified.\n");
         printUsage();
@@ -247,6 +252,14 @@ int main(int argc, char **argv) {
         }
     }
 
+    if(run) {
+        success = stmRun();
+        if(!success) {
+            fprintf(stderr, "Unable to start firmware.\n");
+            goto ExitApp;
+        }
+    }
+
 ExitApp:
     if(ttyFd != -1) close(ttyFd);
     free(devName);
@@ -263,6 +276,7 @@ static void printUsage(void) {
             "  -d DEVICE  Communicate using DEVICE. (/dev/ttyUSB0)\n"
             "  -e         Erase the target device.\n"
             "  -h         Print this help.\n"
+            "  -r         Run the firmware on the device.\n"
             "  -v         Verify the write process.\n"
             "  -w FILE    Write the raw binary FILE to the target device.\n"
             "\n");
@@ -629,6 +643,11 @@ static bool stmCompareToFile(const char *fileName) {
 
     fclose(firmware);
     return ok;
+}
+
+static bool stmRun() {
+    if(!stmSendByte(CMD_GO)) return false;
+    return stmSendAddr(devParams.flashBeginAddr);
 }
 
 static void printProgressBar(int percent) {
