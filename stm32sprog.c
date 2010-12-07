@@ -89,6 +89,9 @@ typedef struct {
 static void printUsage(void);
 
 static bool openDevice(const char *devName, speed_t baud);
+static bool bRead(int fd, uint8_t *buffer, size_t n);
+static bool bWrite(int fd, const uint8_t *buffer, size_t n);
+
 static bool stmConnect(void);
 
 static int cmdIndex(uint8_t cmd);
@@ -266,7 +269,7 @@ static void printUsage(void) {
 }
 
 static bool openDevice(const char *devName, speed_t baud) {
-    ttyFd = open(devName, O_RDWR);
+    ttyFd = open(devName, O_RDWR | O_NOCTTY);
     if(ttyFd == -1) {
         fprintf(stderr, "Unable to open device \"%s\"\n", devName);
         goto DeviceOpenError;
@@ -295,6 +298,34 @@ DeviceOpenError:
     return false;
 }
 
+static bool bRead(int fd, uint8_t *buffer, size_t n) {
+    while(n) {
+        ssize_t result = read(fd, buffer, n);
+        if(result > 0) {
+            buffer += result;
+            n -= result;
+        } else if(result < 0) {
+            fprintf(stderr, "Read error.\n");
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool bWrite(int fd, const uint8_t *buffer, size_t n) {
+    while(n) {
+        ssize_t result = write(fd, buffer, n);
+        if(result > 0) {
+            buffer += result;
+            n -= result;
+        } else if(result < 0) {
+            fprintf(stderr, "Write error.\n");
+            return false;
+        }
+    }
+    return true;
+}
+
 static bool stmConnect(void) {
     int status;
     ioctl(ttyFd, TIOCMGET, &status);
@@ -309,7 +340,7 @@ static bool stmConnect(void) {
     int retries = 0;
     do {
         if(++retries > MAX_RETRIES) return false;
-        (void)write(ttyFd, &data, 1);
+        (void)bWrite(ttyFd, &data, 1);
     } while(!stmRecvAck());
     devParams.firstRead = true;
     return true;
@@ -344,13 +375,13 @@ static bool cmdSupported(Command cmd) {
 
 static bool stmRecvAck(void) {
     uint8_t data = 0;
-    (void)read(ttyFd, &data, 1);
+    if(!bRead(ttyFd, &data, 1)) return false;
     return data == ACK;
 }
 
 static bool stmSendByte(uint8_t byte) {
     uint8_t buffer[] = { byte, ~byte };
-    (void)write(ttyFd, buffer, sizeof(buffer));
+    if(!bWrite(ttyFd, buffer, sizeof(buffer))) return false;
     return stmRecvAck();
 }
 
@@ -361,7 +392,7 @@ static bool stmSendAddr(uint32_t addr) {
         buffer[i] = (uint8_t)(addr >> ((3 - i) * CHAR_BIT));
         buffer[4] ^= buffer[i];
     }
-    (void)write(ttyFd, buffer, sizeof(buffer));
+    if(!bWrite(ttyFd, buffer, sizeof(buffer))) return false;
     return stmRecvAck();
 }
 
@@ -371,14 +402,14 @@ static bool stmSendBlock(const uint8_t *buffer, size_t size) {
     uint8_t n = size + padding - 1;
     uint8_t checksum = n;
     for(size_t i = 0; i < size; ++i) checksum ^= buffer[i];
-    (void)write(ttyFd, &n, 1);
-    (void)write(ttyFd, buffer, size);
+    if(!bWrite(ttyFd, &n, 1)) return false;
+    if(!bWrite(ttyFd, buffer, size)) return false;
     for(size_t i = 0; i < padding; ++i) {
         uint8_t data = 0xFF;
         checksum ^= data;
-        (void)write(ttyFd, &data, 1);
+        if(!bWrite(ttyFd, &data, 1)) return false;
     }
-    (void)write(ttyFd, &checksum, 1);
+    if(!bWrite(ttyFd, &checksum, 1)) return false;
     return stmRecvAck();
 }
 
@@ -393,11 +424,11 @@ static bool stmGetDevParams(void) {
     devParams.writeDelay = 80000;
 
     if(!stmSendByte(CMD_GET_VERSION)) return false;
-    (void)read(ttyFd, &data, 1);
-    (void)read(ttyFd, &devParams.bootloaderVer, 1);
+    if(!bRead(ttyFd, &data, 1)) return false;
+    if(!bRead(ttyFd, &devParams.bootloaderVer, 1)) return false;
     for(int i = 0; i < NUM_COMMANDS_KNOWN; ++i) devParams.commands[i] = false;
     for(int i = data; i > 0; --i) {
-        (void)read(ttyFd, &data, 1);
+        if(!bRead(ttyFd, &data, 1)) return false;
         int idx = cmdIndex(data);
         if(idx >= 0) devParams.commands[idx] = true;
     }
@@ -408,11 +439,11 @@ static bool stmGetDevParams(void) {
         return false;
     }
     if(!stmSendByte(CMD_GET_ID)) return false;
-    (void)read(ttyFd, &data, 1);
+    if(!bRead(ttyFd, &data, 1)) return false;
     if(data != 1) return false;
     uint16_t id = 0;
     for(int i = data; i >= 0; --i) {
-        (void)read(ttyFd, &data, 1);
+        if(!bRead(ttyFd, &data, 1)) return false;
         if(i < 2) {
             id |= data << (i * CHAR_BIT);
         }
@@ -440,7 +471,6 @@ static bool stmGetDevParams(void) {
         break;
     default:
         return false;
-        break;
     }
 
     return true;
@@ -471,7 +501,7 @@ static bool stmEraseFlash(void) {
         // TODO: Test this code with an actual device.
         if(!stmSendByte(CMD_EXTENDED_ERASE)) return false;
         uint8_t data[3] = { 0xFF, 0xFF, 0x00 };
-        (void)write(ttyFd, data, 2);
+        if(!bWrite(ttyFd, data, sizeof(data))) return false;
         if(!stmRecvAck()) return false;
     } else {
         fprintf(stderr,
@@ -548,8 +578,7 @@ static bool stmReadBlock(uint32_t addr, uint8_t *buff, size_t size) {
     if(!stmSendByte(CMD_READ_MEM)) return false;
     if(!stmSendAddr(addr)) return false;
     if(!stmSendByte(size - 1)) return false;
-    (void)read(ttyFd, buff, size);
-    return true;
+    return bRead(ttyFd, buff, size);
 }
 
 static bool stmCompareToFile(const char *fileName) {
