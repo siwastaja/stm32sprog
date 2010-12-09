@@ -1,6 +1,7 @@
 syntax: glob
 
 *.swp
+*.d
 *.o
 stm32sprog
 

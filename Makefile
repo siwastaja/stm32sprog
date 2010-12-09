@@ -1,8 +1,28 @@
-stm32sprog: stm32sprog.c
-	gcc -std=gnu99 -Wall -Wextra -pedantic -g -o stm32sprog stm32sprog.c
+CC := gcc
+LD := gcc
+RM := rm -f
+CFLAGS := -std=gnu99 -g -Wall -Wextra -pedantic -Werror
+
+PRJ := stm32sprog
+SRCS := stm32sprog.c serial.c
+
+all: $(PRJ)
+
+$(PRJ): $(SRCS:.c=.o)
+	$(LD) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+
+%.d: %.c
+	@set -e; $(RM) $@; \
+	$(CC) -M $(CFLAGS) $< > $@.$$$$; \
+	sed 's,\($*\)\.o[ :]*,\1.o $@ : ,g' < $@.$$$$ > $@; \
+	$(RM) $@.$$$$
+
+-include $(SRCS:.c=.d)
 
 clean:
-	-rm -f stm32sprog
+	$(RM) $(PRJ)
+	$(RM) $(SRCS:.c=.o)
+	$(RM) $(SRCS:.c=.d)
 
-.PHONY: clean
+.PHONY: all clean
 

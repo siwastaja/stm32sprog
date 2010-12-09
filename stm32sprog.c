@@ -1,5 +1,4 @@
 #include <assert.h>
-#include <fcntl.h>
 #include <getopt.h>
 #include <limits.h>
 #include <stdbool.h>
@@ -7,11 +6,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/ioctl.h>
-#include <termios.h>
 #include <unistd.h>
 
+#include "serial.h"
+
 static const char *DEFAULT_DEV_NAME = "/dev/ttyUSB0";
+static const int DEFAULT_BAUD = 115200;
 static const int MAX_RETRIES = 10;
 
 static const size_t MAX_BLOCK_SIZE = 256;
@@ -54,10 +54,6 @@ typedef struct {
 
 static void printUsage(void);
 
-static bool openDevice(const char *devName, speed_t baud);
-static bool bRead(int fd, uint8_t *buffer, size_t n);
-static bool bWrite(int fd, const uint8_t *buffer, size_t n);
-
 static bool stmConnect(void);
 
 static int cmdIndex(uint8_t cmd);
@@ -77,14 +73,13 @@ static bool stmCompareToFile(const char *fileName);
 static bool stmRun();
 static void printProgressBar(int percent);
 
-static int ttyFd = -1;
-static struct termios ttyOpts;
+static SerialDev *dev = NULL;
 static DeviceParameters devParams;
 
 int main(int argc, char **argv) {
     bool success = true;
     int opt;
-    speed_t baud = B115200;
+    int baud = DEFAULT_BAUD;
     char *devName = NULL;
     char *fileName = NULL;
     bool erase = false;
@@ -94,43 +89,7 @@ int main(int argc, char **argv) {
     while((opt = getopt(argc, argv, "b:d:ehrvw:")) != -1) {
         switch(opt) {
         case 'b':
-            switch(atoi(optarg)) {
-            case 1200:
-                baud = B1200;
-                break;
-            case 1800:
-                baud = B1800;
-                break;
-            case 2400:
-                baud = B2400;
-                break;
-            case 4800:
-                baud = B4800;
-                break;
-            case 9600:
-                baud = B9600;
-                break;
-            case 19200:
-                baud = B19200;
-                break;
-            case 38400:
-                baud = B38400;
-                break;
-            case 57600:
-                baud = B57600;
-                break;
-            case 115200:
-                baud = B115200;
-                break;
-            case 230400:
-                baud = B230400;
-                break;
-            default:
-                fprintf(stderr, "Baud rate \"%s\" is not supported.\n",
-                        optarg);
-                success = false;
-                goto ExitApp;
-            }
+            baud = atoi(optarg);
             break;
         case 'd':
             devName = strdup(optarg);
@@ -177,7 +136,7 @@ int main(int argc, char **argv) {
 
     /**************************************/
 
-    success = openDevice(devName ? devName : DEFAULT_DEV_NAME, baud);
+    dev = serialOpen(devName ? devName : DEFAULT_DEV_NAME, baud);
     if(!success) goto ExitApp;
 
     success = stmConnect();
@@ -227,7 +186,7 @@ int main(int argc, char **argv) {
     }
 
 ExitApp:
-    if(ttyFd != -1) close(ttyFd);
+    if(dev) serialClose(dev);
     free(devName);
     free(fileName);
     return success ? EXIT_SUCCESS : EXIT_FAILURE;
@@ -238,89 +197,29 @@ static void printUsage(void) {
             "Usage: stm32sprog OPTIONS\n"
             "\n"
             "OPTIONS:\n"
-            "  -b BAUD    Set the baud rate. (115200)\n"
-            "  -d DEVICE  Communicate using DEVICE. (/dev/ttyUSB0)\n"
+            "  -b BAUD    Set the baud rate. (%d)\n"
+            "  -d DEVICE  Communicate using DEVICE. (%s)\n"
             "  -e         Erase the target device.\n"
             "  -h         Print this help.\n"
             "  -r         Run the firmware on the device.\n"
             "  -v         Verify the write process.\n"
             "  -w FILE    Write the raw binary FILE to the target device.\n"
-            "\n");
-}
-
-static bool openDevice(const char *devName, speed_t baud) {
-    ttyFd = open(devName, O_RDWR | O_NOCTTY);
-    if(ttyFd == -1) {
-        fprintf(stderr, "Unable to open device \"%s\"\n", devName);
-        goto DeviceOpenError;
-    }
-
-    cfmakeraw(&ttyOpts);
-    ttyOpts.c_cflag &= ~CSTOPB;
-    ttyOpts.c_cflag |= PARENB;
-    ttyOpts.c_cflag &= ~PARODD;
-    ttyOpts.c_cc[VMIN] = 0;
-    ttyOpts.c_cc[VTIME] = 5;
-    if(cfsetspeed(&ttyOpts, baud) == -1) {
-        fprintf(stderr, "Unable to set baud rate.\n");
-        goto DeviceOptionsError;
-    } else if(tcsetattr(ttyFd, TCSANOW, &ttyOpts) == -1) {
-        fprintf(stderr, "Unable to set device options.\n");
-        goto DeviceOptionsError;
-    }
-
-    return true;
-
-DeviceOptionsError:
-    close(ttyFd);
-    ttyFd = -1;
-DeviceOpenError:
-    return false;
-}
-
-static bool bRead(int fd, uint8_t *buffer, size_t n) {
-    while(n) {
-        ssize_t result = read(fd, buffer, n);
-        if(result > 0) {
-            buffer += result;
-            n -= result;
-        } else if(result < 0) {
-            fprintf(stderr, "Read error.\n");
-            return false;
-        }
-    }
-    return true;
-}
-
-static bool bWrite(int fd, const uint8_t *buffer, size_t n) {
-    while(n) {
-        ssize_t result = write(fd, buffer, n);
-        if(result > 0) {
-            buffer += result;
-            n -= result;
-        } else if(result < 0) {
-            fprintf(stderr, "Write error.\n");
-            return false;
-        }
-    }
-    return true;
+            "\n",
+            DEFAULT_BAUD,
+            DEFAULT_DEV_NAME);
 }
 
 static bool stmConnect(void) {
-    int status;
-    ioctl(ttyFd, TIOCMGET, &status);
-    status |= TIOCM_DTR;
-    ioctl(ttyFd, TIOCMSET, &status);
+    serialSetDtr(dev, true);
     usleep(10000);
-    status &= ~TIOCM_DTR;
-    ioctl(ttyFd, TIOCMSET, &status);
+    serialSetDtr(dev, false);
     usleep(10000);
 
     uint8_t data = 0x7F;
     int retries = 0;
     do {
         if(++retries > MAX_RETRIES) return false;
-        (void)bWrite(ttyFd, &data, 1);
+        (void)serialWrite(dev, &data, 1);
     } while(!stmRecvAck());
     return true;
 }
@@ -354,13 +253,13 @@ static bool cmdSupported(Command cmd) {
 
 static bool stmRecvAck(void) {
     uint8_t data = 0;
-    if(!bRead(ttyFd, &data, 1)) return false;
+    if(!serialRead(dev, &data, 1)) return false;
     return data == ACK;
 }
 
 static bool stmSendByte(uint8_t byte) {
     uint8_t buffer[] = { byte, ~byte };
-    if(!bWrite(ttyFd, buffer, sizeof(buffer))) return false;
+    if(!serialWrite(dev, buffer, sizeof(buffer))) return false;
     return stmRecvAck();
 }
 
@@ -371,7 +270,7 @@ static bool stmSendAddr(uint32_t addr) {
         buffer[i] = (uint8_t)(addr >> ((3 - i) * CHAR_BIT));
         buffer[4] ^= buffer[i];
     }
-    if(!bWrite(ttyFd, buffer, sizeof(buffer))) return false;
+    if(!serialWrite(dev, buffer, sizeof(buffer))) return false;
     return stmRecvAck();
 }
 
@@ -381,14 +280,14 @@ static bool stmSendBlock(const uint8_t *buffer, size_t size) {
     uint8_t n = size + padding - 1;
     uint8_t checksum = n;
     for(size_t i = 0; i < size; ++i) checksum ^= buffer[i];
-    if(!bWrite(ttyFd, &n, 1)) return false;
-    if(!bWrite(ttyFd, buffer, size)) return false;
+    if(!serialWrite(dev, &n, 1)) return false;
+    if(!serialWrite(dev, buffer, size)) return false;
     for(size_t i = 0; i < padding; ++i) {
         uint8_t data = 0xFF;
         checksum ^= data;
-        if(!bWrite(ttyFd, &data, 1)) return false;
+        if(!serialWrite(dev, &data, 1)) return false;
     }
-    if(!bWrite(ttyFd, &checksum, 1)) return false;
+    if(!serialWrite(dev, &checksum, 1)) return false;
     return stmRecvAck();
 }
 
@@ -403,11 +302,11 @@ static bool stmGetDevParams(void) {
     devParams.writeDelay = 80000;
 
     if(!stmSendByte(CMD_GET_VERSION)) return false;
-    if(!bRead(ttyFd, &data, 1)) return false;
-    if(!bRead(ttyFd, &devParams.bootloaderVer, 1)) return false;
+    if(!serialRead(dev, &data, 1)) return false;
+    if(!serialRead(dev, &devParams.bootloaderVer, 1)) return false;
     for(int i = 0; i < NUM_COMMANDS_KNOWN; ++i) devParams.commands[i] = false;
     for(int i = data; i > 0; --i) {
-        if(!bRead(ttyFd, &data, 1)) return false;
+        if(!serialRead(dev, &data, 1)) return false;
         int idx = cmdIndex(data);
         if(idx >= 0) devParams.commands[idx] = true;
     }
@@ -418,11 +317,11 @@ static bool stmGetDevParams(void) {
         return false;
     }
     if(!stmSendByte(CMD_GET_ID)) return false;
-    if(!bRead(ttyFd, &data, 1)) return false;
+    if(!serialRead(dev, &data, 1)) return false;
     if(data != 1) return false;
     uint16_t id = 0;
     for(int i = data; i >= 0; --i) {
-        if(!bRead(ttyFd, &data, 1)) return false;
+        if(!serialRead(dev, &data, 1)) return false;
         if(i < 2) {
             id |= data << (i * CHAR_BIT);
         }
@@ -480,7 +379,7 @@ static bool stmEraseFlash(void) {
         // TODO: Test this code with an actual device.
         if(!stmSendByte(CMD_EXTENDED_ERASE)) return false;
         uint8_t data[] = { 0xFF, 0xFF, 0x00 };
-        if(!bWrite(ttyFd, data, sizeof(data))) return false;
+        if(!serialWrite(dev, data, sizeof(data))) return false;
         if(!stmRecvAck()) return false;
     } else {
         fprintf(stderr,
@@ -557,7 +456,7 @@ static bool stmReadBlock(uint32_t addr, uint8_t *buff, size_t size) {
     if(!stmSendByte(CMD_READ_MEM)) return false;
     if(!stmSendAddr(addr)) return false;
     if(!stmSendByte(size - 1)) return false;
-    return bRead(ttyFd, buff, size);
+    return serialRead(dev, buff, size);
 }
 
 static bool stmCompareToFile(const char *fileName) {
