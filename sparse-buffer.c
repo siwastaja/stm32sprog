@@ -9,9 +9,7 @@
 
 typedef struct Node Node;
 struct Node {
-    size_t offset;
-    uint8_t *data;
-    size_t n;
+    MemBlock block;
 
     int height;
     Node *prev[MAX_HEIGHT];
@@ -20,17 +18,36 @@ struct Node {
 
 struct SparseBuffer {
     Node *begin;
+    Node *curr;
+    size_t offset;
 };
 
-static void *memdup(const void *data, size_t n);
-static bool overlap(size_t offset1, size_t n1, size_t offset2, size_t n2);
+/** \brief Create a copy of a data buffer.
+ *
+ * \param data The data to copy.
+ * \param length The size of the data buffer in bytes.
+ *
+ * \return A copy of the given data.  The caller must free() this pointer.
+ */
+static void *memdup(const void *data, size_t length);
+
+/** \brief Test whether two blocks can be merged into one contiguous block.
+ *
+ * \param block1 The first block.
+ * \param block2 The second block.
+ *
+ * \return \c true if the blocks can be merged, \c false if there is a gap
+ *         between them.
+ */
+static bool overlap(MemBlock block1, MemBlock block2);
 
 static int randomHeight();
 static void insertNode(Node *node, Node *prev[MAX_HEIGHT]);
 static void removeNode(Node *node);
 
 static Node *Node_create();
-static void Node_addData(Node *node, size_t offset, uint8_t *data, size_t n);
+static void Node_destroy(Node *self);
+static void Node_addData(Node *node, MemBlock block);
 
 SparseBuffer *SparseBuffer_create() {
     SparseBuffer *self = malloc(sizeof(SparseBuffer));
@@ -39,6 +56,9 @@ SparseBuffer *SparseBuffer_create() {
     self->begin = Node_create();
     self->begin->height = MAX_HEIGHT;
 
+    self->curr = self->begin;
+    self->offset = 0;
+
     return self;
 }
 
@@ -46,14 +66,13 @@ void SparseBuffer_destroy(SparseBuffer *self) {
     Node *node = self->begin;
     while(node != NULL) {
         Node *next = node->next[0];
-        free(node);
+        Node_destroy(node);
         node = next;
     }
     free(self);
 }
 
-void SparseBuffer_set(SparseBuffer *self,
-        size_t offset, uint8_t *data, size_t n) {
+void SparseBuffer_set(SparseBuffer *self, MemBlock block) {
     Node *prev[MAX_HEIGHT];
     Node *node = self->begin;
     int level = MAX_HEIGHT - 1;
@@ -63,15 +82,15 @@ void SparseBuffer_set(SparseBuffer *self,
         if(!next) {
             prev[level] = node;
             level--;
-        } else if(overlap(offset, n, next->offset, next->n)) {
-            Node_addData(next, offset, data, n);
+        } else if(overlap(block, next->block)) {
+            Node_addData(next, block);
             node = next->next[0];
-            if(node && overlap(node->offset, node->n, next->offset, next->n)) {
-                Node_addData(next, node->offset, node->data, node->n);
+            if(node && overlap(node->block, next->block)) {
+                Node_addData(next, node->block);
                 removeNode(node);
             }
             return;
-        } else if(offset > next->offset) {
+        } else if(block.offset > next->block.offset) {
             node = node->next[level];
         } else {
             prev[level] = node;
@@ -80,26 +99,23 @@ void SparseBuffer_set(SparseBuffer *self,
     }
 
     node = Node_create();
-    Node_addData(node, offset, data, n);
+    Node_addData(node, block);
     insertNode(node, prev);
 }
 
-static void *memdup(const void *data, size_t n) {
-    void *copy = malloc(n);
+static void *memdup(const void *data, size_t length) {
+    void *copy = malloc(length);
     if(!copy) abort();
-    return memcpy(copy, data, n);
+    return memcpy(copy, data, length);
 }
 
-static bool overlap(size_t offset1, size_t n1, size_t offset2, size_t n2) {
-    size_t end1 = offset1 + n1;
-    size_t end2 = offset2 + n2;
-
-    if((offset2 <= offset1) && (offset1 <= end2)) return true;
-    if((offset2 <= end1) && (end1 <= end2)) return true;
-    if((offset1 <= offset2) && (offset2 <= end1)) return true;
-    if((offset1 <= end2) && (end2 <= end1)) return true;
-
-    return false;
+static bool overlap(MemBlock block1, MemBlock block2) {
+    size_t end1 = block1.offset + block1.length;
+    size_t end2 = block2.offset + block2.length;
+    return ((block2.offset <= block1.offset) && (block1.offset <= end2)) ||
+            ((block2.offset <= end1) && (end1 <= end2)) ||
+            ((block1.offset <= block2.offset) && (block2.offset <= end1)) ||
+            ((block1.offset <= end2) && (end2 <= end1));
 }
 
 static int randomHeight() {
@@ -141,9 +157,9 @@ static Node *Node_create() {
     Node *self = malloc(sizeof(Node));
     if(!self) abort();
 
-    self->offset = 0;
-    self->data = NULL;
-    self->n = 0;
+    self->block.offset = 0;
+    self->block.data = NULL;
+    self->block.length = 0;
 
     self->height = randomHeight();
     for(int i = 0; i < MAX_HEIGHT; ++i) {
@@ -154,39 +170,53 @@ static Node *Node_create() {
     return self;
 }
 
-static void Node_addData(Node *self, size_t offset, uint8_t *data, size_t n) {
-    if(!self->data) {
-        self->offset = offset;
-        self->data = memdup(data, n);
-        self->n = n;
+static void Node_destroy(Node *self) {
+    /* const-cast */
+    uint8_t *nodeData = (uint8_t *)self->block.data;
+
+    free(nodeData);
+    free(self);
+}
+
+static void Node_addData(Node *self, MemBlock block) {
+    if(!self->block.data) {
+        self->block.offset = block.offset;
+        self->block.data = memdup(block.data, block.length);
+        self->block.length = block.length;
         return;
     }
 
-    assert(overlap(offset, n, self->offset, self->n));
+    assert(overlap(block, self->block));
 
-    size_t end = offset + n;
-    size_t nodeEnd = self->offset + self->n;
+    size_t end = block.offset + block.length;
+    size_t nodeEnd = self->block.offset + self->block.length;
 
-    if(offset >= self->offset) {
+    /* const-cast */
+    uint8_t *nodeData = (uint8_t *)self->block.data;
+
+    if(block.offset >= self->block.offset) {
         if(end > nodeEnd) {
-            self->n = end - self->offset;
-            self->data = realloc(self->data, self->n);
-            if(!self->data) abort();
+            self->block.length = end - self->block.offset;
+            nodeData = realloc(nodeData, self->block.length);
+            if(!nodeData) abort();
         }
-        size_t diff = offset - self->offset;
-        memcpy(self->data + diff, data, n);
+        size_t diff = block.offset - self->block.offset;
+        memcpy(nodeData + diff, block.data, block.length);
     } else {
-        size_t nTotal = (end >= nodeEnd) ? n : nodeEnd - offset;
-        self->data = realloc(self->data, nTotal);
-        if(!self->data) abort();
+        size_t nTotal = (end >= nodeEnd) ?
+                block.length : nodeEnd - block.offset;
+        nodeData = realloc(nodeData, nTotal);
+        if(!nodeData) abort();
         if(end < nodeEnd) {
             // TODO: Avoid copying data that will be overwritten anyway.
-            size_t diff = self->offset - offset;
-            memmove(self->data + diff, self->data, self->n);
+            size_t diff = self->block.offset - block.offset;
+            memmove(nodeData + diff, self->block.data, self->block.length);
         }
-        memcpy(self->data, data, n);
-        self->offset = offset;
-        self->n = nTotal;
+        memcpy(nodeData, block.data, block.length);
+        self->block.offset = block.offset;
+        self->block.length = nTotal;
     }
+
+    block.data = nodeData;
 }
 

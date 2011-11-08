@@ -10,8 +10,19 @@
  * @{
  */
 
-/** Sparse buffer handle. */
+/** \brief Sparse buffer handle. */
 typedef struct SparseBuffer SparseBuffer;
+
+/** \brief A memory block. */
+typedef struct MemBlock MemBlock;
+struct MemBlock {
+    /** The offset of the data in memory. */
+    size_t offset;
+    /** The length of the data in bytes. */
+    size_t length;
+    /** The data values. */
+    const uint8_t *data;
+};
 
 /** \brief Sparse buffer constructor.
  *
@@ -31,12 +42,18 @@ void SparseBuffer_destroy(SparseBuffer *self);
 /** \brief Sets data in a sparse buffer.
  *
  * \param self The sparse buffer.
- * \param offset The position of the first byte to set.
- * \param data The data.
- * \param n The size of data in bytes.
+ * \param block The block to store in the buffer.
  */
-void SparseBuffer_set(SparseBuffer *self,
-        size_t offset, uint8_t *data, size_t n);
+void SparseBuffer_set(SparseBuffer *self, MemBlock block);
+
+/** \brief Reads data from a sparse buffer.
+ *
+ * \param self The sparse buffer.
+ * \param length The maximum number of bytes to read.
+ *
+ * \return The data.
+ */
+MemBlock SparseBuffer_read(SparseBuffer *self, size_t length);
 
 /*@}*/
 
