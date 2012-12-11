@@ -1,0 +1,34 @@
+= stm32sprog =
+
+stm32sprog is an in-system programming (ISP) utility for STM32
+microcontrollers.  It relies on the STM32's built-in bootloader.
+
+All STM32 microcontrollers have a built-in bootloader that can be used for ISP.
+To activate it, pull the BOOT0 and BOOT1 pins high and low respectively, and
+perform a reset.  The bootloader supports connections to USART1 on all devices.
+Some devices also support connections to USART2.  See ST application notes
+AN2606 and AN3155 for details.
+
+stm32sprog requires a serial connection to the target device's USART.  A simple
+option is to use a USB-to-USART converter.  If the serial hardware supports
+modem control signals, the DTR signal can be used to automatically reset the
+target device.
+
+
+                      ### Connection Diagram ###
+
+             Host Serial                      Target STM32
+                  ,,,,____                  ____,,,,
+                          |                |
+                          |                |
+                       Tx |>--------------<| USART1 Rx
+                          |                |
+                       Rx |>--------------<| USART1 Tx
+                          |                |
+                          |                |
+                          |   (optional)   |
+                      DTR |>--------------<| NRST
+                          |                |
+                          |                |
+                  ,,,,____|                |____,,,,
+
