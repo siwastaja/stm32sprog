@@ -103,6 +103,44 @@ void SparseBuffer_set(SparseBuffer *self, MemBlock block) {
     insertNode(node, prev);
 }
 
+MemBlock SparseBuffer_read(SparseBuffer *self, size_t length) {
+    MemBlock result;
+
+    Node *node = self->curr;
+    size_t offset = self->offset;
+    size_t end = node->block.offset + node->block.length;
+    if(offset >= end) {
+        node = node->next[0];
+        if(!node) {
+            result.offset = 0;
+            result.length = 0;
+            result.data = NULL;
+            return result;
+        }
+        offset = node->block.offset;
+        end = offset + node->block.length;
+    }
+
+    if(offset + length > end) {
+        length = end - offset;
+    }
+
+    size_t diff = offset - node->block.offset;
+    result.offset = offset;
+    result.length = length;
+    result.data = node->block.data + diff;
+
+    self->curr = node;
+    self->offset = offset + length;
+
+    return result;
+}
+
+void SparseBuffer_rewind(SparseBuffer *self) {
+    self->curr = self->begin;
+    self->offset = 0;
+}
+
 static void *memdup(const void *data, size_t length) {
     void *copy = malloc(length);
     if(!copy) abort();
@@ -158,8 +196,8 @@ static Node *Node_create() {
     if(!self) abort();
 
     self->block.offset = 0;
-    self->block.data = NULL;
     self->block.length = 0;
+    self->block.data = NULL;
 
     self->height = randomHeight();
     for(int i = 0; i < MAX_HEIGHT; ++i) {
@@ -181,8 +219,8 @@ static void Node_destroy(Node *self) {
 static void Node_addData(Node *self, MemBlock block) {
     if(!self->block.data) {
         self->block.offset = block.offset;
-        self->block.data = memdup(block.data, block.length);
         self->block.length = block.length;
+        self->block.data = memdup(block.data, block.length);
         return;
     }
 

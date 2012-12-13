@@ -55,6 +55,12 @@ void SparseBuffer_set(SparseBuffer *self, MemBlock block);
  */
 MemBlock SparseBuffer_read(SparseBuffer *self, size_t length);
 
+/** \brief Reset the read position to the beginning of the buffer.
+ *
+ * \param self The sparse buffer.
+ */
+void SparseBuffer_rewind(SparseBuffer *self);
+
 /*@}*/
 
 #endif /* STM32SPROG_SPARSE_BUFFER_H */
