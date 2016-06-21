@@ -404,6 +404,7 @@ static bool stmGetDevParams(void) {
         devParams.flashPageSize = 256;
         break;
     default:
+        fprintf(stderr, "Target device ID 0x%x is unsupported.\n", id);
         return false;
     }
 
