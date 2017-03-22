@@ -408,6 +408,11 @@ static bool stmGetDevParams(void) {
         devParams.flashPagesPerSector = 1;
         devParams.flashPageSize = 2048;
         break;
+    case 0x440: /* STM32F051*/
+        devParams.flashEndAddr = 0x08010000;
+        devParams.flashPagesPerSector = 4;
+        devParams.flashPageSize = 1024;
+        break;
 
     default:
         fprintf(stderr, "Target device ID 0x%x is unsupported.\n", id);
