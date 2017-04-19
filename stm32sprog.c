@@ -413,6 +413,13 @@ static bool stmGetDevParams(void) {
         devParams.flashPagesPerSector = 4;
         devParams.flashPageSize = 1024;
         break;
+    case 0x411: /* STM32F205*/
+        devParams.flashEndAddr = 0x08100000;
+	// Everything's very poorly specified. Hope this works:
+        devParams.flashPagesPerSector = 1; // There are no pages at all in STM32F205
+        devParams.flashPageSize = 16384;   // Reference manual defines a sector as a smallest erasable unit, so it should work like a "page".
+	// Sectors are not all the same size, I use the smallest sector size here.
+        break;
 
     default:
         fprintf(stderr, "Target device ID 0x%x is unsupported.\n", id);
@@ -484,7 +491,7 @@ static bool stmEraseAll(void) {
         uint16_t numPages =
                 (devParams.flashEndAddr - devParams.flashBeginAddr) /
                 devParams.flashPageSize;
-        printf("Erasing...\n");
+        printf("Erasing (page-by-page erase due to failed global erase)...\n");
         return stmErasePages(0, numPages);
     }
 
