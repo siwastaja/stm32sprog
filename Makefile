@@ -1,7 +1,7 @@
 CC := gcc
 LD := gcc
 RM := rm -f
-CFLAGS := -std=gnu99 -g -Wall -Wextra -pedantic -Werror
+CFLAGS := -std=gnu99 -g -Wall -Wextra -pedantic
 
 PRJ := stm32sprog
 SRCS := stm32sprog.c firmware.c serial.c sparse-buffer.c
