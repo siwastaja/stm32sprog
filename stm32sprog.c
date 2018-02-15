@@ -420,6 +420,16 @@ static bool stmGetDevParams(void) {
         devParams.flashPageSize = 16384;   // Reference manual defines a sector as a smallest erasable unit, so it should work like a "page".
 	// Sectors are not all the same size, I use the smallest sector size here.
         break;
+    case 0x451: /* STM32F765*/
+        devParams.flashEndAddr = 0x08200000;
+        // Everything's very poorly specified. Hope this works:
+	// The flash works differently in "single bank" or "dual bank" modes. No idea which the bootloader uses, assuming single bank.
+        devParams.flashPagesPerSector = 1; // There are no pages at all in STM32F765
+        devParams.flashPageSize = 32768;   // Reference manual defines a sector as a smallest erasable unit, so it should work like a "page".
+        // Sectors are not all the same size, I use the smallest sector size here.
+        break;
+
+
 
     default:
         fprintf(stderr, "Target device ID 0x%x is unsupported.\n", id);
