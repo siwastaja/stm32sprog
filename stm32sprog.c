@@ -71,7 +71,7 @@ static bool stmSendByte(uint8_t byte);
 static bool stmSendAddr(uint32_t addr);
 static bool stmSendBlock(const uint8_t *buffer, size_t size);
 
-static bool stmGetDevParams(void);
+static int stmGetDevParams(void);
 static bool stmErasePages(uint16_t first, uint16_t count);
 static bool stmEraseAll(void);
 static bool stmWriteBlock(uint32_t addr, const uint8_t *buff, size_t size);
@@ -155,9 +155,9 @@ int main(int argc, char **argv) {
         goto ExitApp;
     }
 
-    success = stmGetDevParams();
-    if(!success) {
-        fprintf(stderr, "Device not supported.\n");
+    int successint = stmGetDevParams();
+    if(!successint) {
+        fprintf(stderr, "Device not supported or error happened, code=%d.\n", successint);
         goto ExitApp;
     }
     int major = devParams.bootloaderVer >> 4;
@@ -327,7 +327,7 @@ static bool stmSendBlock(const uint8_t *buffer, size_t size) {
     return stmRecvAck();
 }
 
-static bool stmGetDevParams(void) {
+static int stmGetDevParams(void) {
     uint8_t data = 0;
 
     devParams.flashBeginAddr = 0x08000000;
@@ -337,32 +337,32 @@ static bool stmGetDevParams(void) {
     devParams.eraseDelay = 40000;
     devParams.writeDelay = 80000;
 
-    if(!stmSendByte(CMD_GET_VERSION)) return false;
-    if(!serialRead(dev, &data, 1)) return false;
-    if(!serialRead(dev, &devParams.bootloaderVer, 1)) return false;
+    if(!stmSendByte(CMD_GET_VERSION)) return -1;
+    if(!serialRead(dev, &data, 1)) return -2;
+    if(!serialRead(dev, &devParams.bootloaderVer, 1)) return -3;
     for(int i = 0; i < NUM_COMMANDS_KNOWN; ++i) devParams.commands[i] = false;
     for(int i = data; i > 0; --i) {
-        if(!serialRead(dev, &data, 1)) return false;
+        if(!serialRead(dev, &data, 1)) return -4;
         int idx = cmdIndex(data);
         if(idx >= 0) devParams.commands[idx] = true;
     }
-    if(!stmRecvAck()) return false;
+    if(!stmRecvAck()) return -5;
 
     if(!cmdSupported(CMD_GET_ID)) {
         fprintf(stderr, "Target device does not support GET_ID command.\n");
-        return false;
+        return -6;
     }
-    if(!stmSendByte(CMD_GET_ID)) return false;
-    if(!serialRead(dev, &data, 1)) return false;
-    if(data != 1) return false;
+    if(!stmSendByte(CMD_GET_ID)) return -7;
+    if(!serialRead(dev, &data, 1)) return -8;
+    if(data != 1) return -9;
     uint16_t id = 0;
     for(int i = data; i >= 0; --i) {
-        if(!serialRead(dev, &data, 1)) return false;
+        if(!serialRead(dev, &data, 1)) return -10;
         if(i < 2) {
             id |= data << (i * CHAR_BIT);
         }
     }
-    if(!stmRecvAck()) return false;
+    if(!stmRecvAck()) return -11;
     switch(id) {
     case ID_LOW_DENSITY:
         devParams.flashEndAddr = 0x08008000;
@@ -429,11 +429,18 @@ static bool stmGetDevParams(void) {
         // Sectors are not all the same size, I use the smallest sector size here.
         break;
 
+    case 0x450: /* STM32H743*/
+        devParams.flashEndAddr = 0x08200000;
+        devParams.flashPagesPerSector = 1; // There are no pages at all in STM32H743
+        devParams.flashPageSize = 128*1024;   // Reference manual defines a sector as a smallest erasable unit, so it should work like a "page".
+        // Sectors are all the same size! Hooray!
+        break;
+
 
 
     default:
         fprintf(stderr, "Target device ID 0x%x is unsupported.\n", id);
-        return false;
+        return -12;
     }
 
     return true;
